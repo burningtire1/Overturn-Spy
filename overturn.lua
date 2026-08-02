@@ -412,11 +412,10 @@ local function initHooks()
         return
     end
 
-    local mt   = getrawmetatable(game)
-    local orig = mt.__namecall
+    local orig = getrawmetatable(game).__namecall
     S.hookOrig = orig
 
-    hookmetamethod(mt, "__namecall", newcclosure(function(self, ...)
+    hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
         local method = getnamecallmethod()
 
         if not S.paused then
@@ -452,7 +451,7 @@ end
 local function destroyHooks()
     if S.hooked and S.hookOrig then
         pcall(function()
-            hookmetamethod(getrawmetatable(game), "__namecall", S.hookOrig)
+            hookmetamethod(game, "__namecall", S.hookOrig)
         end)
         S.hooked = false
     end
