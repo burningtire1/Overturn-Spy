@@ -1,0 +1,24 @@
+{
+  "header": "scripts/header.lua",
+  "output": "overturn.lua",
+  "modules": [
+    "src/core/config.lua",
+    "src/core/state.lua",
+    "src/core/serializer.lua",
+    "src/core/antispam.lua",
+    "src/core/hooks.lua",
+    "src/ui/helpers.lua",
+    "src/ui/window.lua",
+    "src/ui/titlebar.lua",
+    "src/ui/tabs.lua",
+    "src/ui/search.lua",
+    "src/ui/loglist.lua",
+    "src/ui/ctxmenu.lua",
+    "src/ui/statusbar.lua",
+    "src/ui/toast.lua",
+    "src/ui/interactions.lua",
+    "src/api.lua"
+  ],
+  "strip_module_returns": true,
+  "strip_doc_comments": false
+}
