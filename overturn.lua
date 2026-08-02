@@ -504,13 +504,17 @@ local function pad(l, r, top, bot, p)
 end
 
 local function tw(obj, goal, dur, style, dir)
-    TweenService:Create(obj,
+    local tween = TweenService:Create(obj,
         TweenInfo.new(
             dur   or CFG.AnimTime,
             style or Enum.EasingStyle.Quart,
             dir   or Enum.EasingDirection.Out
         ), goal
-    ):Play()
+    )
+    if type(tween) ~= "string" and tween then
+        tween:Play()
+    end
+    return tween
 end
 
 -- ─────────────────────────────────────────────────────────────
