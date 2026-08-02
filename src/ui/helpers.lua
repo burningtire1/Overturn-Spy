@@ -95,7 +95,9 @@ end
 
 local function tween(inst, info, goals)
     local tw = TS:Create(inst, info, goals)
-    tw:Play()
+    if type(tw) ~= "string" and tw then
+        tw:Play()
+    end
     return tw
 end
 
