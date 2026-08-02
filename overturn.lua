@@ -415,31 +415,52 @@ local function initHooks()
     local orig = getrawmetatable(game).__namecall
     S.hookOrig = orig
 
+    -- Re-entrancy guard: prevents the hook from calling itself when addEntry
+    -- (or anything it calls) triggers __namecall internally (e.g. _ser walking
+    -- an Instance's Parent chain, task.defer, BindableEvent:Fire, etc.).
+    local _inside = false
+
     hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        -- Fast path: reject non-remote methods immediately before any work.
         local method = getnamecallmethod()
+        if method ~= "FireServer" and method ~= "InvokeServer" then
+            return orig(self, ...)
+        end
 
-        if not S.paused then
-            local cls = typeof(self) == "Instance" and self.ClassName or nil
+        -- Re-entrancy guard: if we're already processing a remote call, pass through.
+        if _inside or S.paused then
+            return orig(self, ...)
+        end
 
-            if method == "FireServer" then
-                if cls == "RemoteEvent" then
-                    addEntry({ type = "RemoteEvent", remote = self, args = {...} })
-                elseif cls == "UnreliableRemoteEvent" then
-                    addEntry({ type = "UnreliableRemoteEvent", remote = self, args = {...} })
-                end
+        local cls = typeof(self) == "Instance" and self.ClassName or nil
+        if not cls then return orig(self, ...) end
 
-            elseif method == "InvokeServer" and cls == "RemoteFunction" then
-                local inv = { type = "RemoteFunction", remote = self, args = {...}, time = os.clock() }
-                addEntry(inv)
+        _inside = true
 
-                local ret = table.pack(orig(self, ...))
-                if ret.n > 0 then
-                    local retArgs = table.create(ret.n)
-                    for i = 1, ret.n do retArgs[i] = ret[i] end
-                    addEntry({ type = "ReturnValue", remote = self, args = retArgs, linked = inv })
-                end
-                return table.unpack(ret, 1, ret.n)
+        if method == "FireServer" then
+            if cls == "RemoteEvent" then
+                addEntry({ type = "RemoteEvent", remote = self, args = {...} })
+            elseif cls == "UnreliableRemoteEvent" then
+                addEntry({ type = "UnreliableRemoteEvent", remote = self, args = {...} })
             end
+            _inside = false
+
+        elseif method == "InvokeServer" and cls == "RemoteFunction" then
+            local inv = { type = "RemoteFunction", remote = self, args = {...}, time = os.clock() }
+            addEntry(inv)
+            _inside = false
+
+            local ret = table.pack(orig(self, ...))
+            if ret.n > 0 then
+                local retArgs = table.create(ret.n)
+                for i = 1, ret.n do retArgs[i] = ret[i] end
+                _inside = true
+                addEntry({ type = "ReturnValue", remote = self, args = retArgs, linked = inv })
+                _inside = false
+            end
+            return table.unpack(ret, 1, ret.n)
+        else
+            _inside = false
         end
 
         return orig(self, ...)
