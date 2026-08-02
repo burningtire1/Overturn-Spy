@@ -415,55 +415,63 @@ local function initHooks()
     local orig = getrawmetatable(game).__namecall
     S.hookOrig = orig
 
-    -- Re-entrancy guard: prevents the hook from calling itself when addEntry
-    -- (or anything it calls) triggers __namecall internally (e.g. _ser walking
-    -- an Instance's Parent chain, task.defer, BindableEvent:Fire, etc.).
-    local _inside = false
-
     hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-        -- Fast path: reject non-remote methods immediately before any work.
         local method = getnamecallmethod()
-        if method ~= "FireServer" and method ~= "InvokeServer" then
+
+        -- ── Fast reject: only the three remote call methods matter to us.
+        -- Everything else (GetService, FindFirstChild, Lerp, etc.) returns immediately.
+        if method ~= "FireServer"
+        and method ~= "InvokeServer"
+        and method ~= "FireUnreliableServer" then
             return orig(self, ...)
         end
 
-        -- Re-entrancy guard: if we're already processing a remote call, pass through.
-        if _inside or S.paused then
-            return orig(self, ...)
-        end
-
-        local cls = typeof(self) == "Instance" and self.ClassName or nil
-        if not cls then return orig(self, ...) end
-
-        _inside = true
-
-        if method == "FireServer" then
-            if cls == "RemoteEvent" then
-                addEntry({ type = "RemoteEvent", remote = self, args = {...} })
-            elseif cls == "UnreliableRemoteEvent" then
-                addEntry({ type = "UnreliableRemoteEvent", remote = self, args = {...} })
-            end
-            _inside = false
-
-        elseif method == "InvokeServer" and cls == "RemoteFunction" then
-            local inv = { type = "RemoteFunction", remote = self, args = {...}, time = os.clock() }
-            addEntry(inv)
-            _inside = false
-
+        -- ── InvokeServer must stay synchronous because the caller needs the return value.
+        -- We call orig FIRST (zero delay to the game), then process in a deferred task.
+        if method == "InvokeServer" then
             local ret = table.pack(orig(self, ...))
-            if ret.n > 0 then
-                local retArgs = table.create(ret.n)
-                for i = 1, ret.n do retArgs[i] = ret[i] end
-                _inside = true
-                addEntry({ type = "ReturnValue", remote = self, args = retArgs, linked = inv })
-                _inside = false
+            if not S.paused then
+                -- Snapshot args now (varargs evaporate after this frame)
+                local argsCopy = { ... }
+                local retCopy  = table.create(ret.n)
+                for i = 1, ret.n do retCopy[i] = ret[i] end
+                local remRef = self
+                task.defer(function()
+                    local ok, cls = pcall(function() return remRef.ClassName end)
+                    if not ok or cls ~= "RemoteFunction" then return end
+                    addEntry({ type = "RemoteFunction", remote = remRef, args = argsCopy })
+                    if ret.n > 0 then
+                        addEntry({ type = "ReturnValue", remote = remRef, args = retCopy })
+                    end
+                end)
             end
             return table.unpack(ret, 1, ret.n)
-        else
-            _inside = false
         end
 
-        return orig(self, ...)
+        -- ── FireServer / FireUnreliableServer: call orig IMMEDIATELY so the game
+        -- is never blocked, then process everything in a deferred task.
+        local result = orig(self, ...)
+
+        if not S.paused then
+            local argsCopy = { ... }
+            local remRef   = self
+            local meth     = method
+            task.defer(function()
+                local ok, cls = pcall(function() return remRef.ClassName end)
+                if not ok then return end
+                local rtype
+                if meth == "FireServer" and cls == "RemoteEvent" then
+                    rtype = "RemoteEvent"
+                elseif meth == "FireUnreliableServer" and cls == "UnreliableRemoteEvent" then
+                    rtype = "UnreliableRemoteEvent"
+                end
+                if rtype then
+                    addEntry({ type = rtype, remote = remRef, args = argsCopy })
+                end
+            end)
+        end
+
+        return result
     end))
 
     S.hooked = true
